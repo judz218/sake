@@ -1,4 +1,4 @@
-# 酒の余白 — 発表用の静的デモ
+# 酒跡（さけあと / sakeato） — 発表用の静的デモ
 
 React・TypeScript・Vite・D3・Tailwind CSSで構成した日本酒記録アプリです。ExpressやSQLiteを起動せず、Netlifyなどの静的ホスティングで動作します。追加ライブラリを使わず、ブラウザ標準のIndexedDBに保存します。
 
