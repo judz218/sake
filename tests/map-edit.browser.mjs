@@ -31,8 +31,14 @@ try{
  const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
  const waitFor=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await sleep(50);}throw new Error(`Timeout: ${expression}`);};
  const click=async selector=>{await evaluate(`document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new MouseEvent('click',{bubbles:true}))`);await sleep(80);};
+ await send('Page.enable');
  await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
  await send('Emulation.setTouchEmulationEnabled',{enabled:true});
+ await send('Page.addScriptToEvaluateOnNewDocument',{source:"window.__pageToken=Math.random().toString(36)"});
+ const reload=async()=>{
+  const token=await evaluate('window.__pageToken');await send('Page.reload');
+  await waitFor(`window.__pageToken!==${JSON.stringify(token)} && document.querySelectorAll('.map-node').length===40`);
+ };
  await send('Page.navigate',{url:`http://127.0.0.1:${port}/`});
  await waitFor("document.querySelectorAll('svg circle').length===40");
  const instrument=()=>evaluate(`window.__putCount=0;window.__fail=false;window.__delay=0;const original=window.fetch.bind(window);window.fetch=(url,options)=>{
@@ -80,7 +86,7 @@ try{
  assert.equal(await evaluate('window.__putCount'),1);
  assert.deepEqual([(await saved()).dryness,(await saved()).richness],live);
  await click('.map-edit-toggle');assert.equal(await evaluate("document.querySelector('.map-edit-toggle').getAttribute('aria-pressed')"),'false');
- await send('Page.reload');await waitFor("document.querySelectorAll('svg circle').length===40");
+ await reload();
  assert.equal(await evaluate("document.querySelector('.map-edit-toggle').getAttribute('aria-pressed')"),'false');
  assert.deepEqual([(await saved()).dryness,(await saved()).richness],live);
  await instrument();
@@ -94,9 +100,27 @@ try{
  assert.deepEqual([(await saved()).dryness,(await saved()).richness],live);
 
  await click('.tabs button:nth-child(2)');assert.equal(await evaluate("document.querySelector('.map-edit-toggle')===null"),true);
- assert.equal(await evaluate("document.querySelectorAll('svg rect').length"),33);
+ assert.equal(await evaluate("document.querySelectorAll('.difference-axis').length"),2);
+ assert.equal(await evaluate("document.querySelectorAll('.official-marker').length"),2);
+ assert.equal(await evaluate("document.querySelectorAll('.personal-marker').length"),2);
+ assert.equal(await evaluate("document.querySelectorAll('.map-node').length"),0);
  assert.equal(await evaluate("[...document.querySelectorAll('svg circle')].some(n=>n.__on?.some(h=>h.name==='drag'))"),false);
- await click('.tabs button:nth-child(3)');assert.equal(await evaluate("document.querySelectorAll('svg circle').length"),40);
+ const comparable=await evaluate(`fetch('/api/data').then(r=>r.json()).then(d=>{const sake=d.sakes.find(s=>s.officialDryness!==null&&s.officialRichness!==null&&d.records.filter(r=>r.sakeId===s.id).length>1);return {sake,records:d.records.filter(r=>r.sakeId===sake.id).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id)}})`);
+ const choose=async(selector,value)=>{await evaluate(`(()=>{const select=document.querySelector(${JSON.stringify(selector)});select.value=${JSON.stringify(String(value))};select.dispatchEvent(new Event('change',{bubbles:true}));})()`);await sleep(80);};
+ await choose('.chart-select select',comparable.sake.id);
+ assert.equal(await evaluate("Number(document.querySelectorAll('.chart-select select')[1].value)"),comparable.records[0].id);
+ const past=comparable.records.at(-1);
+ await choose('.comparison-card .chart-select select',past.id);
+ assert.ok(Math.abs(await evaluate("Number(document.querySelector('.personal-marker').getAttribute('cx'))")-(24+past.dryness*2.72))<0.001);
+ assert.equal(await evaluate("document.querySelector('.comparison-card').textContent.includes('すべて架空')"),true);
+ for(const width of [375,390,430]){await send('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate(`document.documentElement.scrollWidth<=${width}`),true);}
+ await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ await click('.tabs button:nth-child(3)');assert.equal(await evaluate("document.querySelectorAll('.preference-row').length"),4);
+ assert.equal(await evaluate("document.querySelectorAll('svg').length"),0);
+ const expectedGroups=await evaluate(`fetch('/api/data').then(r=>r.json()).then(d=>{const groups=[[],[],[],[]];for(const r of d.records){if(r.dryness!==null&&r.richness!==null&&r.rating!==null)groups[(r.richness<50?2:0)+(r.dryness>=50?1:0)].push(r.rating);}return groups.map(g=>g.length?('★ '+(g.reduce((a,b)=>a+b,0)/g.length).toFixed(1)+'（'+g.length+'件）'):'記録なし');})`);
+ assert.deepEqual(await evaluate("[...document.querySelectorAll('.preference-row .between span')].map(n=>n.textContent)"),expectedGroups);
+ for(const width of [375,390,430]){await send('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate(`document.documentElement.scrollWidth<=${width}`),true);}
+ await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
  assert.equal(await evaluate("[...document.querySelectorAll('svg circle')].some(n=>n.__on?.some(h=>h.name==='drag'))"),false);
  await click('.tabs button:first-child');assert.equal(await evaluate("document.querySelector('.map-edit-toggle').getAttribute('aria-pressed')"),'false');
  // Touch viewing scrolls normally; editing captures only the touched node.
@@ -121,7 +145,20 @@ try{
  assert.equal(await evaluate('window.__putCount'),1);
  for(const width of [375,390,430]){await send('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate(`document.documentElement.scrollWidth<=${width}`),true);}
  await click('nav button:nth-child(3)');assert.deepEqual(await evaluate("[...document.querySelectorAll('.stats strong')].map(n=>n.textContent)"),['40','30']);
- console.log('PASS: view/edit, tap, drag threshold, live coordinates, single save, pending lock, reload, rollback, tabs, comparison, touch scroll/drag, unchanged drag, analysis, 375/390/430px');
+ // Partial official information and missing personal axis, in this in-memory fixture only.
+ await evaluate(`fetch('/api/sakes/${comparable.sake.id}',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...${JSON.stringify(comparable.sake)},officialRichness:null,sourceUrl:'https://example.com/source'})})`);
+ await reload();
+ await click('.tabs button:nth-child(2)');await choose('.chart-select select',comparable.sake.id);
+ assert.equal(await evaluate("document.querySelectorAll('.official-marker').length"),1);
+ assert.equal(await evaluate("document.querySelector('.comparison-source a').getAttribute('href')"),'https://example.com/source');
+ assert.equal(await evaluate("document.querySelector('.official-comparison').textContent.includes('この軸の公式情報は未登録')"),true);
+ // Empty datasets render all three modes without assuming a selected product or record.
+ await send('Page.addScriptToEvaluateOnNewDocument',{source:`window.__emptyFixture=true;const actualFetch=window.fetch.bind(window);window.fetch=(url,options)=>String(url)==='/api/data'?Promise.resolve(new Response(JSON.stringify({sakes:[],records:[]}),{headers:{'Content-Type':'application/json'}})):actualFetch(url,options);`});
+ await send('Page.reload');await waitFor("window.__emptyFixture && document.querySelector('.map-edit-toggle')!==null && document.querySelectorAll('.map-node').length===0");
+ assert.equal(await evaluate("document.querySelectorAll('.map-node').length"),0);
+ await click('.tabs button:nth-child(2)');assert.equal(await evaluate("document.querySelector('main').textContent.includes('比較できる公式')"),true);
+ await click('.tabs button:nth-child(3)');assert.equal(await evaluate("[...document.querySelectorAll('.preference-row .between span')].every(n=>n.textContent==='記録なし')"),true);
+ console.log('PASS: personal edit/save/rollback/touch, comparison product/date selection/partial axes/source, quadrant means/counts, all empty modes, analysis, all modes at 375/390/430px');
  await send('Browser.close').catch(()=>{});
 }finally{
  ws?.close();browser?.kill();server.kill();
