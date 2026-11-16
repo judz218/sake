@@ -41,6 +41,14 @@ try{
  };
  await send('Page.navigate',{url:`http://127.0.0.1:${port}/`});
  await waitFor("document.querySelectorAll('svg circle').length===40");
+ const assertEditButtonLayout=async()=>{
+  const layout=await evaluate(`(()=>{const button=document.querySelector('.map-edit-toggle'),card=button.closest('.map-card'),b=button.getBoundingClientRect(),c=card.getBoundingClientRect(),s=card.querySelector('svg').getBoundingClientRect();return {inside:b.x>=c.x&&b.right<=c.right,above:b.bottom<=s.top,width:b.width,height:b.height,rightGap:c.right-b.right};})()`);
+  assert.equal(layout.inside,true);assert.equal(layout.above,true,'button must not overlap SVG or its axis labels');
+  assert.ok(layout.width>=44&&layout.height>=44);assert.ok(layout.rightGap>=10&&layout.rightGap<=16);
+  return layout.width;
+ };
+ const editButtonWidth=await assertEditButtonLayout();
+ assert.equal(await evaluate("document.querySelector('.map-edit-toggle').textContent"),'✎ 編集');
  const instrument=()=>evaluate(`window.__putCount=0;window.__fail=false;window.__delay=0;const original=window.fetch.bind(window);window.fetch=(url,options)=>{
   if(String(url).includes('/api/records/')&&options?.method==='PUT'){
    window.__putCount++;
@@ -69,6 +77,8 @@ try{
  await click('nav button:first-child');await waitFor("document.querySelector('svg')!==null");
  await click(selector);assert.equal(await evaluate("document.querySelector('svg')===null"),true);
  await click('nav button:first-child');await click('.map-edit-toggle');
+ assert.equal(await evaluate("document.querySelector('.map-edit-toggle').textContent"),'✓ 完了');
+ assert.equal(await assertEditButtonLayout(),editButtonWidth);
  await click(selector);assert.equal(await evaluate("document.querySelector('.map-selection')!==null"),true);
  assert.equal(await evaluate("document.querySelector('svg')!==null"),true);
  p=await dragStart();await dragMove(p,2,1);await dragEnd(p,2,1);
@@ -143,7 +153,7 @@ try{
  // Move away and back: unchanged final coordinates must not produce a PUT.
  await sleep(600);p=await dragStart();await dragMove(p,25,-15);await dragMove(p,0,0);await dragEnd(p,0,0);
  assert.equal(await evaluate('window.__putCount'),1);
- for(const width of [375,390,430]){await send('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate(`document.documentElement.scrollWidth<=${width}`),true);}
+ for(const width of [375,390,430]){await send('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate(`document.documentElement.scrollWidth<=${width}`),true);assert.equal(await assertEditButtonLayout(),editButtonWidth);}
  await click('nav button:nth-child(3)');assert.deepEqual(await evaluate("[...document.querySelectorAll('.stats strong')].map(n=>n.textContent)"),['40','30']);
  // Partial official information and missing personal axis, in this in-memory fixture only.
  await evaluate(`fetch('/api/sakes/${comparable.sake.id}',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...${JSON.stringify(comparable.sake)},officialRichness:null,sourceUrl:'https://example.com/source'})})`);
