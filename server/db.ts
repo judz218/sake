@@ -1,7 +1,7 @@
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync} from 'node:fs';
-import {dirname,resolve} from 'node:path';
-const path=process.env.DB_PATH || resolve('data/sake.sqlite');
+import {dirname} from 'node:path';
+import {databasePath as path} from './config.ts';
 if(path!==':memory:') mkdirSync(dirname(path),{recursive:true});
 export const db=new DatabaseSync(path);
 db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;

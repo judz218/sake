@@ -1,8 +1,9 @@
 import express from 'express';
 import {db,transaction} from './db.ts';
 import {InputError,validate} from './validation.ts';
+import {demoMode} from './config.ts';
 export const app=express();app.use(express.json({limit:'100kb'}));
-const all=()=>({sakes:db.prepare('SELECT * FROM sakes ORDER BY name').all(),records:db.prepare('SELECT * FROM records ORDER BY date DESC,id DESC').all().map(r=>({...r,tags:JSON.parse(String(r.tags))}))});
+const all=()=>({demoMode,sakes:db.prepare('SELECT * FROM sakes ORDER BY name').all(),records:db.prepare('SELECT * FROM records ORDER BY date DESC,id DESC').all().map(r=>({...r,tags:JSON.parse(String(r.tags))}))});
 function insert(table:string,values:Record<string,unknown>,sample=0){const now=new Date().toISOString();const v={...values,sample,createdAt:now,updatedAt:now};return Number(db.prepare(`INSERT INTO ${table} (${Object.keys(v).join(',')}) VALUES (${Object.keys(v).map(()=>'?').join(',')})`).run(...Object.values(v) as (string|number|null)[]).lastInsertRowid);}
 app.get('/api/data',(_req,res)=>res.json(all()));
 for(const table of ['sakes','records'] as const){
