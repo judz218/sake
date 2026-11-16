@@ -98,9 +98,9 @@ export function PersonalTasteMap({data,open,save,onBusyChange}:{data:Data;open:(
   <div className="map-edit-toolbar"><button type="button" className={`map-edit-toggle${editable?' active':''}`} aria-pressed={editable} disabled={saving} onClick={()=>{
    if(pending.current||dragging.current)return;
    setEditing(!editable);setSelected(null);selectedId.current=null;setError('');
-  }}>{editable?'✓ 完了':'✎ 編集'}</button><span role="status">{saving?'保存しています…':editable?'ドラッグ終了時に自動保存':''}</span></div>
+  }}>{editable?'✓ 完了':'✎ 編集'}</button><span className="map-record-count">{data.records.length}件の記録</span></div>
   <svg ref={ref} viewBox="0 0 360 365" aria-label="甘辛と濃淡の味覚マップ"/><div className="legend">{colors.map((c,i)=><span key={c}><i style={{background:c}}/>{i?`★${i}`:'未評価'}</span>)}</div></div>
-  <p className="hint">{editable?'ノードをドラッグして味の評価を変更できます。':'丸をタップすると詳細を確認できます。'}<br/>重なった記録は下の一覧から選べます。</p>
+  <p className="hint">{editable?'ノードをドラッグして味の評価を変更できます。':'丸をタップすると詳細を確認できます。'}<br/>{editable&&<span className="map-save-status" role="status">{saving?'保存しています…':'ドラッグ終了時に自動保存'}</span>}重なった記録は下の一覧から選べます。</p>
   {editable&&selected&&<div className="map-selection"><strong>{data.sakes.find(s=>s.id===data.records.find(r=>r.id===selected.id)?.sakeId)?.name}</strong><div>甘辛評価 <output>{selected.dryness}</output> / 100　濃淡評価 <output>{selected.richness}</output> / 100</div></div>}
   {error&&<p className="error" role="alert">{error}<br/>元の座標に戻しました。</p>}
   {!plotted.length&&<p className="empty">まだマップに記録がありません。<br/>甘辛・濃淡を評価すると、ここに表示されます。</p>}
