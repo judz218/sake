@@ -28,6 +28,11 @@ export function comparisonMessage(personal:number|null,official:number|null,axis
  if(Math.abs(difference)<=10)return '公式情報と近い評価です。';
  return axis==='dryness'?`公式情報より${difference<0?'甘口':'辛口'}寄りに感じています。`:`公式情報より${difference<0?'淡麗':'濃醇'}に感じています。`;
 }
+export function comparisonSummary(record:TastingRecord,sake:Sake):string{
+ const messages=[{axis:'甘辛',message:comparisonMessage(record.dryness,sake.officialDryness,'dryness'),available:sake.officialDryness!==null},{axis:'濃淡',message:comparisonMessage(record.richness,sake.officialRichness,'richness'),available:sake.officialRichness!==null}].filter(m=>m.available);
+ if(messages.length===2&&messages.every(m=>m.message==='公式情報と近い評価です。'))return '甘辛・濃淡ともに公式情報と近い評価です。';
+ return messages.map(m=>`${m.axis}：${m.message}`).join(' ');
+}
 export function comparisonSakes(sakes:readonly Sake[]):Sake[]{
  return sakes.filter(s=>s.officialDryness!==null||s.officialRichness!==null);
 }
