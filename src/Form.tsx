@@ -1,6 +1,6 @@
 import {useEffect,useState} from 'react';
 import type {Data,Sake,TastingRecord} from './types';
-import {api} from './api';
+import {repository} from './data/repository';
 export const tags=['フルーティー','米の旨み','すっきり','まろやか','酸味がある','キレがある','余韻が長い','飲みやすい'];
 type SakeInput=Omit<Sake,'id'|'sample'|'createdAt'|'updatedAt'>;
 type EntryInput=Pick<TastingRecord,'date'|'dryness'|'richness'|'aroma'|'rating'|'tags'|'memo'|'place'>;
@@ -23,7 +23,7 @@ export function RecordForm({data,record,done,cancel}:{data:Data;record?:TastingR
  const {entry,sake}=draft;
  const setEntry=(e:Partial<EntryInput>)=>setDraft({...draft,entry:{...entry,...e}});
  useEffect(()=>{sessionStorage.setItem(key,JSON.stringify(draft));const fn=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue='';};window.addEventListener('beforeunload',fn);return()=>window.removeEventListener('beforeunload',fn);},[draft]);
- async function submit(){setBusy(true);setError('');try{let id=record?.id;if(record)await api(`/records/${record.id}`,'PUT',{...entry,sakeId:draft.sakeId});else id=(await api<{id:number}>('/entries','POST',{sakeId:draft.sakeId,sake,record:entry})).id;await done(id!);sessionStorage.removeItem(key);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+ async function submit(){setBusy(true);setError('');try{let id=record?.id;if(record)await repository.updateRecord(record.id,{...entry,sakeId:draft.sakeId});else id=(await repository.createEntry({sakeId:draft.sakeId,sake,record:entry})).id;await done(id!);sessionStorage.removeItem(key);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
  const ratings=['好みではない','あまり好みではない','普通','好き','とても好き'];
  return <form onSubmit={e=>{e.preventDefault();if(step===1)setStep(2);else void submit();}}>
  <div className="between"><button type="button" className="text-btn" disabled={busy} onClick={()=>{if(confirm('入力内容は下書きとして残ります。画面を閉じますか？'))cancel();}}>閉じる</button><span className="eyebrow">STEP {step} / 2</span></div>
@@ -45,5 +45,5 @@ export function RecordForm({data,record,done,cancel}:{data:Data;record?:TastingR
 export function SakeEditor({sake,done,cancel}:{sake:Sake;done:()=>Promise<void>;cancel:()=>void}){
  const [v,set]=useState<SakeInput>({...sake}),[error,setError]=useState(''),[busy,setBusy]=useState(false);
  useEffect(()=>{const fn=(e:BeforeUnloadEvent)=>{e.preventDefault();e.returnValue='';};window.addEventListener('beforeunload',fn);return()=>window.removeEventListener('beforeunload',fn);},[]);
- return <form onSubmit={async e=>{e.preventDefault();setBusy(true);try{await api(`/sakes/${sake.id}`,'PUT',v);await done();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}><button type="button" className="text-btn" disabled={busy} onClick={()=>{if(JSON.stringify(v)===JSON.stringify(sake)||confirm('編集内容を破棄して戻りますか？'))cancel();}}>← 詳細に戻る</button><h1>日本酒情報</h1><p className="hint">この銘柄のすべての飲酒記録に反映されます。</p>{error&&<p role="alert" className="error">{error}</p>}<label>銘柄名<input required value={v.name} onChange={e=>set({...v,name:e.target.value})}/></label><SakeFields value={v} set={set} official/><button className="primary" disabled={busy}>{busy?'保存中…':'日本酒情報を保存'}</button></form>;
+ return <form onSubmit={async e=>{e.preventDefault();setBusy(true);try{await repository.updateSake(sake.id,v);await done();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}><button type="button" className="text-btn" disabled={busy} onClick={()=>{if(JSON.stringify(v)===JSON.stringify(sake)||confirm('編集内容を破棄して戻りますか？'))cancel();}}>← 詳細に戻る</button><h1>日本酒情報</h1><p className="hint">この銘柄のすべての飲酒記録に反映されます。</p>{error&&<p role="alert" className="error">{error}</p>}<label>銘柄名<input required value={v.name} onChange={e=>set({...v,name:e.target.value})}/></label><SakeFields value={v} set={set} official/><button className="primary" disabled={busy}>{busy?'保存中…':'日本酒情報を保存'}</button></form>;
 }
