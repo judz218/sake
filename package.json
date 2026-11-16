@@ -5,7 +5,7 @@
   "build":"tsc --noEmit && vite build",
   "start":"vite preview --host 0.0.0.0",
   "preview":"vite preview --host 0.0.0.0",
-  "test":"tsx --test src/tasteAnalysis.test.ts src/data/seed.test.ts",
+  "test":"tsx --test src/tasteAnalysis.test.ts src/data/seed.test.ts src/shelfData.test.ts",
   "test:map":"node tests/map-edit.browser.mjs",
   "test:legacy":"tsx --test server/api.test.ts server/persistence.test.ts server/demo.test.ts",
   "legacy:api":"tsx server/index.ts",

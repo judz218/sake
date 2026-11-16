@@ -2,7 +2,7 @@
 import {spawn} from 'node:child_process';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
-import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve,extname,sep} from 'node:path';
 import assert from 'node:assert/strict';
@@ -39,10 +39,40 @@ try{
  await send('Page.addScriptToEvaluateOnNewDocument',{source:"window.__pageToken=Math.random().toString(36)"});
  const reload=async()=>{
   const token=await evaluate('window.__pageToken');await send('Page.reload');
-  await waitFor(`window.__pageToken!==${JSON.stringify(token)} && document.querySelectorAll('.map-node').length===40`);
+  await waitFor(`window.__pageToken!==${JSON.stringify(token)} && document.querySelector('.shelf-home')!==null`);await click('nav button[data-page=map]');await waitFor("document.querySelectorAll('.map-node').length===40");
  };
  await send('Page.navigate',{url:`http://127.0.0.1:${port}/`});
- await waitFor("document.querySelectorAll('svg circle').length===40");
+ await waitFor("document.querySelectorAll('.shelf-bottle').length===30");
+ if(process.env.QA_SCREENSHOT){const screenshot=await send('Page.captureScreenshot',{format:'png'});writeFileSync(process.env.QA_SCREENSHOT,Buffer.from(screenshot.data,'base64'));}
+ await send('Page.addScriptToEvaluateOnNewDocument',{source:`window.__readData=()=>new Promise((resolve,reject)=>{const open=indexedDB.open('sake-notebook-presentation');open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result,tx=db.transaction(['sakes','records'],'readonly'),s=tx.objectStore('sakes').getAll(),r=tx.objectStore('records').getAll();tx.oncomplete=()=>{db.close();resolve({sakes:s.result,records:r.result});};};});`});
+ // Install the same helper in the already loaded document.
+ await evaluate(`window.__readData=()=>new Promise((resolve,reject)=>{const open=indexedDB.open('sake-notebook-presentation');open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result,tx=db.transaction(['sakes','records'],'readonly'),s=tx.objectStore('sakes').getAll(),r=tx.objectStore('records').getAll();tx.oncomplete=()=>{db.close();resolve({sakes:s.result,records:r.result});};};});`);
+ const instrument=()=>evaluate(`window.__putCount=0;window.__fail=false;window.__delay=0;const original=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){if(this.name==='records'){window.__putCount++;if(window.__fail)throw new Error('保存テストエラー');}return original.apply(this,args);};const descriptor=Object.getOwnPropertyDescriptor(IDBTransaction.prototype,'oncomplete');Object.defineProperty(IDBTransaction.prototype,'oncomplete',{configurable:true,get:descriptor.get,set(fn){descriptor.set.call(this,function(e){if(window.__delay)setTimeout(()=>fn.call(this,e),window.__delay);else fn.call(this,e);});}});true;`);
+ await instrument();
+ let acceptDialogs=true;
+ ws.addEventListener('message',event=>{const message=JSON.parse(event.data);if(message.method==='Page.javascriptDialogOpening')void send('Page.handleJavaScriptDialog',{accept:acceptDialogs});});
+ assert.equal(await evaluate("document.querySelector('nav .active').dataset.page"),'shelf');
+ assert.equal(await evaluate("document.querySelectorAll('.shelf-row').length"),8);
+ const bottleDesigns=await evaluate("Object.fromEntries([...document.querySelectorAll('.shelf-bottle')].map(n=>[n.dataset.sakeId,n.querySelector('svg').dataset.design]))");
+ const seedData=await evaluate('window.__readData()');
+ const search=async(value)=>{await evaluate(`(()=>{const el=document.querySelector('#shelf-search');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event('input',{bubbles:true}));})()`);await sleep(80);};
+ await search(seedData.sakes[0].brewery);
+ assert.ok(await evaluate("document.querySelectorAll('.shelf-bottle').length>0 && document.querySelectorAll('.shelf-bottle').length<30"));
+ await search('該当のない検索文字列');assert.equal(await evaluate("document.querySelectorAll('.shelf-bottle').length"),0);
+ await click('.search-clear');assert.equal(await evaluate("document.querySelectorAll('.shelf-bottle').length"),30);
+ await evaluate("(()=>{const select=document.querySelector('.shelf-sort select');select.value='count';select.dispatchEvent(new Event('change',{bubbles:true}));})()");await sleep(80);
+ const firstSake=await evaluate("Number(document.querySelector('.shelf-bottle').dataset.sakeId)");
+ const firstCount=seedData.records.filter(r=>r.sakeId===firstSake).length;
+ assert.ok(firstCount>1);await click('.shelf-bottle');
+ assert.equal(await evaluate("document.querySelectorAll('.history-card').length"),firstCount);
+ await click('.sake-back');assert.equal(await evaluate("document.querySelector('.shelf-sort select').value"),'count');
+ for(const width of [375,390,430]){await send('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate(`document.documentElement.scrollWidth<=${width}`),true);assert.equal(await evaluate("getComputedStyle(document.querySelector('.shelf-row')).gridTemplateColumns.split(' ').length"),4);}
+ await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ await reload();
+ await click('nav button[data-page=shelf]');
+ assert.deepEqual(await evaluate("Object.fromEntries([...document.querySelectorAll('.shelf-bottle')].map(n=>[n.dataset.sakeId,n.querySelector('svg').dataset.design]))"),bottleDesigns);
+ await click('nav button[data-page=map]');
+ await instrument();
  const assertEditButtonLayout=async()=>{
   const layout=await evaluate(`(()=>{const button=document.querySelector('.map-edit-toggle'),card=button.closest('.map-card'),b=button.getBoundingClientRect(),c=card.getBoundingClientRect(),s=card.querySelector('svg').getBoundingClientRect();return {inside:b.x>=c.x&&b.right<=c.right,above:b.bottom<=s.top,width:b.width,height:b.height,rightGap:c.right-b.right};})()`);
   assert.equal(layout.inside,true);assert.equal(layout.above,true,'button must not overlap SVG or its axis labels');
@@ -51,13 +81,6 @@ try{
  };
  const editButtonWidth=await assertEditButtonLayout();
  assert.equal(await evaluate("document.querySelector('.map-edit-toggle').textContent"),'✎ 編集');
- await send('Page.addScriptToEvaluateOnNewDocument',{source:`window.__readData=()=>new Promise((resolve,reject)=>{const open=indexedDB.open('sake-notebook-presentation');open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result,tx=db.transaction(['sakes','records'],'readonly'),s=tx.objectStore('sakes').getAll(),r=tx.objectStore('records').getAll();tx.oncomplete=()=>{db.close();resolve({sakes:s.result,records:r.result});};};});`});
- // Install the same helper in the already loaded document.
- await evaluate(`window.__readData=()=>new Promise((resolve,reject)=>{const open=indexedDB.open('sake-notebook-presentation');open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result,tx=db.transaction(['sakes','records'],'readonly'),s=tx.objectStore('sakes').getAll(),r=tx.objectStore('records').getAll();tx.oncomplete=()=>{db.close();resolve({sakes:s.result,records:r.result});};};});`);
- const instrument=()=>evaluate(`window.__putCount=0;window.__fail=false;window.__delay=0;const original=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){if(this.name==='records'){window.__putCount++;if(window.__fail)throw new Error('保存テストエラー');}return original.apply(this,args);};const descriptor=Object.getOwnPropertyDescriptor(IDBTransaction.prototype,'oncomplete');Object.defineProperty(IDBTransaction.prototype,'oncomplete',{configurable:true,get:descriptor.get,set(fn){descriptor.set.call(this,function(e){if(window.__delay)setTimeout(()=>fn.call(this,e),window.__delay);else fn.call(this,e);});}});true;`);
- await instrument();
- let acceptDialogs=true;
- ws.addEventListener('message',event=>{const message=JSON.parse(event.data);if(message.method==='Page.javascriptDialogOpening')void send('Page.handleJavaScriptDialog',{accept:acceptDialogs});});
  const record=await evaluate(`(()=>{const circles=[...document.querySelectorAll('svg circle')];return Number(circles.find(c=>{
   const x=+c.getAttribute('cx'),y=+c.getAttribute('cy');return x>65&&x<280&&y>65&&y<280&&circles.every(o=>o===c||Math.hypot(x-+o.getAttribute('cx'),y-+o.getAttribute('cy'))>24);
  }).dataset.recordId)})()`);
@@ -75,9 +98,9 @@ try{
  assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(selector)}).__on?.some(h=>h.name==='drag')`),false);
  let p=await dragStart();await dragMove(p,30,-20);await dragEnd(p,30,-20);
  assert.equal(await evaluate('window.__putCount'),0);assert.equal((await saved()).dryness,original.dryness);
- await click('nav button:first-child');await waitFor("document.querySelector('svg')!==null");
+ await click('nav button[data-page=map]');await waitFor("document.querySelector('svg')!==null");
  await click(selector);assert.equal(await evaluate("document.querySelector('.tasting-detail')!==null"),true);
- await click('nav button:first-child');await click('.map-edit-toggle');
+ await click('nav button[data-page=map]');await click('.map-edit-toggle');
  assert.equal(await evaluate("document.querySelector('.map-edit-toggle').textContent"),'✓ 完了');
  assert.equal(await assertEditButtonLayout(),editButtonWidth);
  await click(selector);assert.equal(await evaluate("document.querySelector('.map-selection')!==null"),true);
@@ -113,7 +136,7 @@ try{
  await click('.map-edit-toggle');await sleep(550);
  const comparable=await evaluate(`window.__readData().then(d=>{const sake=d.sakes.find(s=>s.officialDryness!==null&&s.officialRichness!==null&&d.records.filter(r=>r.sakeId===s.id).length>1);return {sake,records:d.records.filter(r=>r.sakeId===sake.id).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id)}})`);
  const past=comparable.records.at(-1);
- const openFromHistory=async(id)=>{await click('nav button:nth-child(2)');await click('.history-card[data-record-id="'+id+'"]');};
+ const openFromHistory=async(id)=>{const row=await evaluate(`window.__readData().then(d=>d.records.find(r=>r.id===${id}))`);await click('nav button[data-page=shelf]');await click('.shelf-bottle[data-sake-id="'+row.sakeId+'"]');await click('.history-card[data-record-id="'+id+'"]');};
  await click('svg .map-node[data-record-id="'+past.id+'"]');
  assert.equal(await evaluate("document.querySelector('.detail-back').textContent.includes('マップ')"),true);
  assert.equal(await evaluate("document.querySelector('.tasting-memo').textContent"),past.memo);
@@ -127,18 +150,18 @@ try{
  await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
  await click('.detail-back');assert.equal(await evaluate("document.querySelectorAll('.map-node').length"),40);
  await openFromHistory(past.id);
- assert.equal(await evaluate("document.querySelector('.detail-back').textContent.includes('飲酒履歴')"),true);
+ assert.equal(await evaluate("document.querySelector('.detail-back').textContent.includes('銘柄詳細')"),true);
  assert.equal(await evaluate("document.querySelector('.comparison-table').textContent"),comparisonRows);
  assert.equal(await evaluate("document.querySelector('.tasting-memo').textContent"),past.memo);
- await click('.detail-back');assert.equal(await evaluate("document.querySelectorAll('.history-card').length"),40);
- await click('nav button:nth-child(3)');
+ await click('.detail-back');assert.equal(await evaluate("document.querySelectorAll('.history-card').length"),comparable.records.length);await click('.sake-back');
+ await click('nav button[data-page=analysis]');
  assert.equal(await evaluate("document.querySelectorAll('.preference-chart').length"),1);
  assert.equal(await evaluate("document.querySelector('main section').classList.contains('preference-chart')"),true);
  const expectedGroups=await evaluate(`window.__readData().then(d=>{const groups=[[],[],[],[]];for(const r of d.records){if(r.dryness!==null&&r.richness!==null&&r.rating!==null)groups[(r.richness<50?2:0)+(r.dryness>=50?1:0)].push(r.rating);}return groups.map(g=>g.length?('★ '+(g.reduce((a,b)=>a+b,0)/g.length).toFixed(1)+'（'+g.length+'件）'):'記録なし');})`);
  assert.deepEqual(await evaluate("[...document.querySelectorAll('.preference-row .between span')].map(n=>n.textContent)"),expectedGroups);
  for(const width of [375,390,430]){await send('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate(`document.documentElement.scrollWidth<=${width}`),true);}
  await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
- await click('nav button:first-child');assert.equal(await evaluate("document.querySelector('.map-edit-toggle').getAttribute('aria-pressed')"),'false');
+ await click('nav button[data-page=map]');assert.equal(await evaluate("document.querySelector('.map-edit-toggle').getAttribute('aria-pressed')"),'false');
  assert.equal(await evaluate("document.querySelectorAll('.tabs').length"),0);
  // Touch viewing scrolls normally; editing captures only the touched node.
  await evaluate('window.__fail=false;window.__delay=0;window.__putCount=0;window.scrollTo(0,0)');
@@ -161,7 +184,7 @@ try{
  await sleep(600);p=await dragStart();await dragMove(p,25,-15);await dragMove(p,0,0);await dragEnd(p,0,0);
  assert.equal(await evaluate('window.__putCount'),1);
  for(const width of [375,390,430]){await send('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate(`document.documentElement.scrollWidth<=${width}`),true);assert.equal(await assertEditButtonLayout(),editButtonWidth);}
- await click('nav button:nth-child(3)');assert.deepEqual(await evaluate("[...document.querySelectorAll('.stats strong')].map(n=>n.textContent)"),['40','30']);
+ await click('nav button[data-page=analysis]');assert.deepEqual(await evaluate("[...document.querySelectorAll('.stats strong')].map(n=>n.textContent)"),['40','30']);
  // Partial official information and missing personal axis, in this in-memory fixture only.
  await evaluate(`new Promise((resolve,reject)=>{const open=indexedDB.open('sake-notebook-presentation');open.onsuccess=()=>{const db=open.result,tx=db.transaction('sakes','readwrite');tx.objectStore('sakes').put({...${JSON.stringify(comparable.sake)},officialRichness:null,sourceUrl:'https://example.com/source'});tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};})`);
  await reload();
@@ -179,13 +202,13 @@ try{
  // Empty datasets render all three modes without assuming a selected product or record.
  await evaluate(`new Promise(resolve=>{const open=indexedDB.open('sake-notebook-presentation');open.onsuccess=()=>{const db=open.result,tx=db.transaction(['sakes','records'],'readwrite');tx.objectStore('records').clear();tx.objectStore('sakes').clear();tx.oncomplete=()=>{db.close();resolve();};};})`);
  const emptyToken=await evaluate('window.__pageToken');await send('Page.reload');
- await waitFor(`window.__pageToken!==${JSON.stringify(emptyToken)} && document.querySelector('.map-edit-toggle')!==null && document.querySelectorAll('.map-node').length===0`);
+ await waitFor(`window.__pageToken!==${JSON.stringify(emptyToken)} && document.querySelector('.shelf-home')!==null && document.querySelectorAll('.shelf-bottle').length===0`);
  assert.equal(await evaluate("document.querySelectorAll('.map-node').length"),0);
- await click('nav button:nth-child(2)');assert.equal(await evaluate("document.querySelectorAll('.history-card').length"),0);
- await click('nav button:nth-child(3)');assert.equal(await evaluate("[...document.querySelectorAll('.preference-row .between span')].every(n=>n.textContent==='記録なし')"),true);
+ await click('nav button[data-page=shelf]');assert.equal(await evaluate("document.querySelector('.shelf-empty').textContent.includes('まだ日本酒の記録がありません')"),true);
+ await click('nav button[data-page=analysis]');assert.equal(await evaluate("[...document.querySelectorAll('.preference-row .between span')].every(n=>n.textContent==='記録なし')"),true);
  // Reset requires confirmation, including after an intentionally emptied database.
  acceptDialogs=false;await click('.samples button');assert.equal((await evaluate('window.__readData()')).records.length,0);
- acceptDialogs=true;await click('.samples button');await waitFor("document.querySelectorAll('.map-node').length===40");
+ acceptDialogs=true;await click('.samples button');await waitFor("document.querySelectorAll('.shelf-bottle').length===30");
  assert.equal((await evaluate('window.__readData()')).sakes.length,30);
  const afterReset=await saved();assert.equal(afterReset.dryness,original.dryness);assert.equal(afterReset.richness,original.richness);
  await reload();assert.equal((await evaluate('window.__readData()')).records.length,40,'reload does not duplicate seed');
@@ -207,19 +230,31 @@ try{
  await waitFor("document.querySelector('h1')?.textContent==='ブラウザCRUD'");
  await click('section .text-btn');await fill('form input','ブラウザCRUD編集済み');await click('form .primary');
  await waitFor("document.querySelector('h1')?.textContent==='ブラウザCRUD編集済み'");
- await send('Page.reload');await waitFor("document.querySelectorAll('.map-node').length===40");
+ await reload();
  snapshot=await evaluate('window.__readData()');assert.equal(snapshot.records.length,41);assert.equal(snapshot.records.find(r=>r.id===addedRecord.id).memo,'編集済み');
  assert.equal(snapshot.sakes.find(s=>s.id===addedSake.id).name,'ブラウザCRUD編集済み');
- await click('nav button:nth-child(2)');
+ await click('nav button[data-page=shelf]');
  const managerDelete=`[...document.querySelectorAll('.rank')].find(n=>n.textContent.includes('ブラウザCRUD編集済み')).querySelector('button').click()`;
  await evaluate(managerDelete);await waitFor("[...document.querySelectorAll('[role=alert]')].some(n=>n.textContent.includes('飲酒記録が残っている'))");
  assert.equal((await evaluate('window.__readData()')).sakes.length,31);
- await evaluate("[...document.querySelectorAll('.history-card')].find(n=>n.textContent.includes('ブラウザCRUD編集済み')).click()");
- await click('section .danger');await waitFor("document.querySelectorAll('.history-card').length===40");
+ await click('.shelf-bottle[data-sake-id="'+addedSake.id+'"]');await click('.history-card[data-record-id="'+addedRecord.id+'"]');
+ await click('section .danger');await waitFor("document.querySelector('.sake-record-heading')!==null && document.querySelectorAll('.history-card').length===0");await click('.sake-back');assert.equal(await evaluate("document.querySelectorAll('.shelf-bottle').length"),30);
  await evaluate(managerDelete);await waitFor("document.querySelectorAll('.rank').length===30");
  assert.equal((await evaluate('window.__readData()')).sakes.length,30);
+ // Adding another tasting of an existing product keeps a single, unchanged bottle.
+ await click('.add-record');
+ await evaluate(`(()=>{const select=document.querySelector('form select');select.value='${seedData.sakes[0].id}';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);await sleep(80);
+ await click('form .primary');await fill('form textarea','既存の銘柄追加テスト');await click('form .primary');
+ await waitFor("document.querySelector('.tasting-detail')!==null");
+ snapshot=await evaluate('window.__readData()');assert.equal(snapshot.records.length,41);assert.equal(snapshot.sakes.length,30);
+ const repeated=snapshot.records.find(r=>r.memo==='既存の銘柄追加テスト');
+ await click('.detail-back');assert.equal(await evaluate("document.querySelectorAll('.history-card').length"),seedData.records.filter(r=>r.sakeId===repeated.sakeId).length+1);
+ await click('.sake-back');assert.equal(await evaluate("document.querySelectorAll('.shelf-bottle').length"),30);
+ assert.equal(await evaluate(`document.querySelector('.shelf-bottle[data-sake-id="${repeated.sakeId}"] svg').dataset.design`),bottleDesigns[repeated.sakeId]);
+ await openFromHistory(repeated.id);await click('section .danger');
+ assert.equal((await evaluate('window.__readData()')).records.length,40);
  assert.equal(apiRequests,0,'the app must never request an API');
- console.log('PASS: static-only IndexedDB seed/no duplicates, reset confirmation, CRUD/atomic rollback/persistence, map edit/touch/save failure, detail comparison/back navigation, analysis preferences, empty states, 375/390/430px; API requests: 0');
+ console.log('PASS: static-only IndexedDB seed/no duplicates, reset confirmation, CRUD/atomic rollback/persistence, map edit/touch/save failure, shelf search/sort/deterministic bottles, sake/record detail/back navigation, analysis preferences, empty states, 375/390/430px; API requests: 0');
  await send('Browser.close').catch(()=>{});
 }finally{
  ws?.close();browser?.kill();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
