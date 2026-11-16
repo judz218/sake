@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {comparisonMessage,comparisonSakes,officialProvenance,preferenceSummary,quadrantRatings,recordsForSake} from './tasteAnalysis.ts';
+import {comparisonMessage,comparisonSakes,comparisonSummary,officialProvenance,preferenceSummary,quadrantRatings,recordsForSake} from './tasteAnalysis.ts';
 import {OfficialComparisonChart} from './OfficialComparisonChart.tsx';
 import {PreferenceChart} from './PreferenceChart.tsx';
 import type {Sake,TastingRecord} from './types.ts';
@@ -46,13 +46,19 @@ test('difference threshold, missing axes, provenance and latest-first record sel
  assert.match(officialProvenance(sake({officialBasis:''})),/未確認/);
 });
 
-test('comparison render: missing information, partial axes, latest record and same-name brands',()=>{
- assert.match(renderToStaticMarkup(createElement(OfficialComparisonChart,{data:{sakes:[],records:[]}})),/比較できる公式/);
- const html=renderToStaticMarkup(createElement(OfficialComparisonChart,{data:{demoMode:true,sakes:[sake({sourceUrl:'https://example.com/source',officialRichness:null}),sake({id:2,brewery:'別の酒蔵'})],records:[record({date:'2025-01-01',dryness:10}),record({id:2,dryness:35})]}}));
- assert.match(html,/記録 #2/);assert.match(html,/自分 35、公式 20/);assert.match(html,/この軸の公式情報は未登録/);
- assert.match(html,/https:\/\/example.com\/source/);assert.match(html,/別の酒蔵/);assert.match(html,/すべて架空/);
- assert.equal((html.match(/class="official-marker"/g)??[]).length,1);
- assert.match(renderToStaticMarkup(createElement(OfficialComparisonChart,{data:{sakes:[sake()],records:[]}})),/飲酒記録はまだありません/);
+test('detail comparison: square scatter, missing axes and no inferred coordinates',()=>{
+ const missing=renderToStaticMarkup(createElement(OfficialComparisonChart,{sake:sake({officialDryness:null,officialRichness:null}),record:record()}));
+ assert.match(missing,/比較用の公式情報が登録されていません/);assert.doesNotMatch(missing,/<svg/);
+ const partial=renderToStaticMarkup(createElement(OfficialComparisonChart,{demoMode:true,sake:sake({officialRichness:null}),record:record({dryness:35})}));
+ assert.doesNotMatch(partial,/<svg/);assert.match(partial,/<td>35<\/td>/);assert.match(partial,/すべて架空/);
+ assert.equal((partial.match(/scope="row"/g)??[]).length,1);
+ const unknown=renderToStaticMarkup(createElement(OfficialComparisonChart,{sake:sake(),record:record({dryness:null})}));
+ assert.doesNotMatch(unknown,/<svg/);assert.match(unknown,/未評価/);
+ const full=renderToStaticMarkup(createElement(OfficialComparisonChart,{sake:sake({officialDryness:100,officialRichness:100}),record:record({dryness:0,richness:0})}));
+ assert.equal((full.match(/<svg /g)??[]).length,1);assert.match(full,/viewBox="0 0 360 360"/);
+ assert.match(full,/cx="34" cy="326"/);assert.match(full,/class="official-marker" x="316" y="24"/);
+ assert.equal((full.match(/class="personal-marker"/g)??[]).length,1);
+ assert.match(comparisonSummary(record(),sake()),/甘辛・濃淡ともに.*近い/);
 });
 
 test('preference render: no-data quadrants, decimal precision, rated sample counts',()=>{
