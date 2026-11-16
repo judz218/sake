@@ -1,3 +1,3 @@
 export interface Sake {id:number;name:string;brewery:string;prefecture:string;designation:string;classifications:string;officialDescription:string;sourceUrl:string;nihonshudo:number|null;acidity:number|null;officialDryness:number|null;officialRichness:number|null;officialBasis:string;sample:number;createdAt:string;updatedAt:string}
 export interface TastingRecord {id:number;sakeId:number;date:string;dryness:number|null;richness:number|null;aroma:string;rating:number|null;tags:string[];memo:string;place:string;sample:number;createdAt:string;updatedAt:string}
-export interface Data {sakes:Sake[];records:TastingRecord[]}
+export interface Data {sakes:Sake[];records:TastingRecord[];demoMode?:boolean}

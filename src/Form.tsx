@@ -9,7 +9,7 @@ export const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d
 export function SakeFields({value,set,official=false}:{value:SakeInput;set:(s:SakeInput)=>void;official?:boolean}){
  const field=(key:keyof SakeInput,label:string,numeric=false)=><label key={key}>{label}<input type={numeric?'number':'text'} step="any" value={value[key]??''} onChange={e=>set({...value,[key]:numeric?(e.target.value===''?null:Number(e.target.value)):e.target.value})}/></label>;
  return <>{field('brewery','酒蔵名')}{field('prefecture','産地（都道府県）')}
- <label>特定名称<select value={value.designation} onChange={e=>set({...value,designation:e.target.value})}>{['','普通酒','本醸造酒','特別本醸造酒','純米酒','特別純米酒','吟醸酒','純米吟醸','大吟醸酒','純米大吟醸'].map(v=><option key={v}>{v}</option>)}</select></label>
+ <label>特定名称<select value={value.designation} onChange={e=>set({...value,designation:e.target.value})}>{['','普通酒','本醸造酒','特別本醸造酒','純米酒','特別純米酒','吟醸酒','純米吟醸','大吟醸酒','純米大吟醸',...(!['','普通酒','本醸造酒','特別本醸造酒','純米酒','特別純米酒','吟醸酒','純米吟醸','大吟醸酒','純米大吟醸'].includes(value.designation)?[value.designation]:[])].map(v=><option key={v}>{v}</option>)}</select></label>
  {field('classifications','その他の分類（生酒・原酒など）')}
  {official&&<><label>公式説明文<textarea value={value.officialDescription} onChange={e=>set({...value,officialDescription:e.target.value})}/></label>{field('sourceUrl','公式情報の出典URL')}{field('nihonshudo','日本酒度',true)}{field('acidity','酸度',true)}{field('officialDryness','公式の甘辛（0 甘口〜100 辛口）',true)}{field('officialRichness','公式の濃淡（0 淡麗〜100 濃醇）',true)}<label>公式座標の根拠・取得方法<textarea value={value.officialBasis} onChange={e=>set({...value,officialBasis:e.target.value})}/></label><p className="hint">根拠がある場合のみ座標を入力してください。日本酒度・酸度から自動変換しません。</p></>}</>;
 }
